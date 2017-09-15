@@ -41,7 +41,7 @@ raw json files in _raw/_ and builds html blog entries stores in
 _entries/_.
 
 To do so, just execute `bloggen.py`. Every blog entry is positioned in
-a separate file in _entries/YYYY/m/D/_. There are also a overall html
+a separate file in _entries/YYYY/m/D/_. There are also an overall html
 files like _entries/0.html_, _entries/1.html_, ... which implement
 pagination.
 

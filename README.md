@@ -22,7 +22,7 @@ Blog entries are basically simple json files containing the following.
 {
  "author": "mkind",
  "date": "2017-05-28 01:51:12",
- "title": "Hello!"
+ "title": "Hello!",
  "entry": "
 Hello World.
 "}

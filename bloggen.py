@@ -7,18 +7,19 @@ import sys
 import os
 import re
 
+__author__ = "mkind"
+
 TITLE_LEN = 100
-RSS_DAYS_MAX = 30
-BLOG_DAYS_MAX = 25
+RSS_ENTRIES_MAX = 30
+BLOG_ENTRIES_MAX = 1000
 SOURCE_DIR = "raw"
 DEST_DIR = "entries"
 BLOG_DOMAIN = "https://blog.mknd.net"
-
-files = []
-
 TAG_RE = re.compile(r'<[^>]+>')
 
-__author__ = "mkind"
+files = []
+all_entries = dict()
+jsondecoder = json.JSONDecoder(strict=False)
 
 
 def remove_tags(text):
@@ -29,9 +30,6 @@ def remove_tags(text):
 
 with open("templates/entry.tmpl") as f:
     ENTRY_HTML = f.read()
-
-with open("templates/day.tmpl") as f:
-    DAY_HTML = f.read()
 
 with open("templates/body.tmpl") as f:
     BODY_HTML = f.read()
@@ -48,90 +46,144 @@ with open("templates/rss_item.tmpl") as f:
 with open("templates/rss.tmpl") as f:
     RSS_XML = f.read()
 
-for dirname, dirnames, filenames in os.walk(SOURCE_DIR):
-    for filename in sorted(filenames, reverse=True):
-        if ".swp" in filename:
-            continue
-        files.append(os.path.join(dirname, filename))
-all_days = dict()
 
-jsondecoder = json.JSONDecoder(strict=False)
+def get_files(sources):
+    """
+    get a list of all files. ignore temporary files.
+    """
+    for dirname, dirnames, filenames in os.walk(sources):
+        for filename in sorted(filenames, reverse=True):
+            if ".swp" in filename or ".bak" in filename:
+                continue
+            files.append(os.path.join(dirname, filename))
+    return files
 
-for fileentry in files:
-    content = open(fileentry, "rt", encoding="utf-8", errors="replace").read()
+
+def extract_blog_data(content):
+    """
+    gets blog data
+    """
     json_data = jsondecoder.decode(content)
-    date = datetime.strptime(json_data["date"], "%Y-%m-%d %H:%M:%S")
-    author = json_data["author"]
-    entry = json_data["entry"]
+    date = datetime.strptime(json_data["date"],
+                            "%Y-%m-%d %H:%M:%S")
     path = "{year}/{month}/{day}".format(
-                year=date.year,
-                month=date.month,
-                day=date.day
-            )
+                    year=date.year,
+                    month=date.month,
+                    day=date.day
+                )
     fn = date.strftime("%H%M%S") + ".html"
-    day = date.strftime("%d %b %Y")
-    article_link = "/" + path + "/" + fn
 
-    sys.stdout.write("file %s.." % (fn))
+    entry = {
+            "date": date,
+            "author": json_data["author"],
+            "entry": json_data["entry"],
+            "title": json_data["title"],
+            "day": date.strftime("%d %b %Y"),
+            "fn": fn,
+            "path": path,
+            "article_link": "/" + path + "/" + fn
+            }
 
-    # create entry html
-    entry_html = ENTRY_HTML.format(entry=entry, article_link=article_link)
+    sys.stdout.write("file %s.." % (entry["article_link"]))
+    return entry
 
-    # create rss item
-    article_link_total = BLOG_DOMAIN + article_link
-    rss_item_xml = RSS_ITEM_XML.format(
-        title=remove_tags(entry)[:TITLE_LEN] + "..",
-        link=article_link_total,
-        author=author,
-        description=entry,
-        guid=article_link_total,
-        date=date.strftime("%a, %d %b %Y %H:%M:%S +0100")
-    )
 
-    # associate entry with
-    d = date.strftime("%Y%m%d")
-    if d in all_days:
-        all_days[d]['html'].append(entry_html)
-        all_days[d]['rss'].append(rss_item_xml)
-    else:
-        all_days[d] = {
-                    "html": [entry_html],
-                    "rss": [rss_item_xml],
-                    "day": day
-                    }
-
-    # if entry is shown as single article (e.g. by requesting article URI),
-    # use day template with only the requested article
-    day_html = DAY_HTML.format(date=day, entries=entry_html)
+def build_single_page_html(entry):
+    entry_html = ENTRY_HTML.format(
+                    title=entry["title"],
+                    entry=entry["entry"],
+                    date=entry["date"],
+                    day=entry["day"],
+                    article_link=entry["article_link"]
+                )
 
     # body html
-    body_html = BODY_HTML.format(content=day_html)
+    body_html = BODY_HTML.format(content=entry_html)
 
     # overall page
     header_html = META_HTML.format(
-                    last_modified=date.strftime("%a, %d %b %Y %H:%M:%S GMT")
+                    last_modified=entry["date"].strftime("%a, %d %b %Y %H:%M:%S GMT")
                   )
     all_html = ALL_HTML.format(header=header_html, body=body_html)
 
     # store entry html files
-    abs_path = DEST_DIR + "/" + path + "/" + fn
-    os.makedirs(DEST_DIR + "/" + path, exist_ok=True)
-
-#    if os.path.isfile(abs_path):
-#        continue
+    abs_path = DEST_DIR + "/" + entry["path"] + "/" + entry["fn"]
+    os.makedirs(DEST_DIR + "/" + entry["path"], exist_ok=True)
 
     with open(abs_path, "bw") as f:
         f.write(all_html.encode("utf-8", "replace"))
         sys.stdout.write("written\n")
 
-days_html_for_one_page = []
+
+def build_all_page_html(all_entries):
+    """
+    Build a html page containing multiple entries.
+    """
+    count = 0
+    entries_html_for_one_page = []
+
+    for timestamp in sorted(iter(all_entries), reverse=True)[:100]:
+        entry = all_entries[timestamp]
+        entry_html = ENTRY_HTML.format(
+                    title=entry["title"],
+                    entry=entry["entry"],
+                    date=entry["date"],
+                    day=entry["day"],
+                    article_link=entry["article_link"]
+                )
+
+        if len(entries_html_for_one_page) < BLOG_ENTRIES_MAX:
+            entries_html_for_one_page.append(entry_html)
+
+        else:
+            write_page(entries_html_for_one_page, str(count))
+            count += 1
+            entries_html_for_one_page = []
+
+    write_page(entries_html_for_one_page, str(count))
 
 
-def write_page(days_html_for_one_page, fn):
-    days_html = "\n".join(days_html_for_one_page)
+def build_all_page_rss(all_entries):
+    """
+    Build a rss page for multiple entries.
+    """
+    count = 0
+    rss_xml_all_items = ""
+
+    for timestamp in sorted(iter(all_entries), reverse=True)[:100]:
+        entry = all_entries[timestamp]
+        article_link_total = BLOG_DOMAIN + entry["article_link"]
+        rss_item_xml = RSS_ITEM_XML.format(
+            title=entry["title"],
+            link=article_link_total,
+            author=entry["author"],
+            description=entry["entry"],
+            guid=article_link_total,
+            date=entry["date"].strftime("%a, %d %b %Y %H:%M:%S +0100")
+        )
+
+        # adding item to rss
+        if count < RSS_ENTRIES_MAX:
+            rss_xml_all_items += rss_item_xml
+            count += 1
+
+    # build rss
+    rss_xml = RSS_XML.format(
+            lastbuild=datetime.now().strftime("%a, %d %b %Y %H:%M:%S GMT"),
+            item=rss_xml_all_items)
+
+    rss_path = DEST_DIR + "/rss.xml"
+    with open(rss_path, "bw") as f:
+        sys.stdout.write("%s.." % (rss_path))
+        f.write(rss_xml.encode("utf-8", "replace"))
+        sys.stdout.write("written\n")
+
+
+def write_page(entries_html_for_one_page, fn):
+    entry_html = "\n".join(entries_html_for_one_page)
 
     # body html
-    body_html = BODY_HTML.format(content=days_html)
+    body_html = BODY_HTML.format(content=entry_html)
 
     # overall page
     date = datetime.now()
@@ -146,42 +198,31 @@ def write_page(days_html_for_one_page, fn):
     with open(abs_path, "bw") as f:
         sys.stdout.write("%s (entries:%d).." % (
             abs_path,
-            len(days_html_for_one_page)))
+            len(entries_html_for_one_page)))
         f.write(all_html.encode("utf-8", "replace"))
         sys.stdout.write("written\n")
 
 
-count = 0
-rss_xml_all_items = ""
-for day in sorted(iter(all_days), reverse=True)[:100]:
-    entries = all_days[day]
-    entries_html = "\n".join(entries["html"])
-    rss_items_per_day = "\n".join(entries["rss"])
-    day_html = DAY_HTML.format(date=entries["day"], entries=entries_html)
+def process(files):
+    """
+    extract content of files and create corresponding blog
+    html
+    """
 
-    if len(days_html_for_one_page) < BLOG_DAYS_MAX:
-        days_html_for_one_page.append(day_html)
+    for fileentry in files:
+        with open(fileentry, "rt", encoding="utf-8", errors="replace")  as f:
+            content = f.read()
 
-    else:
-        write_page(days_html_for_one_page, str(count))
-        count += 1
-        days_html_for_one_page = []
+        entry = extract_blog_data(content)
+        build_single_page_html(entry)
 
-    # adding item to rss
-    if count < RSS_DAYS_MAX:
-        rss_xml_all_items += rss_items_per_day
+        # store all blog entries here. this allows us, to
+        # add them chronologically in a single page
+        d = entry["date"].strftime("%Y%m%d%H%M%S")
+        all_entries[d] = entry
 
-if days_html_for_one_page:
-    write_page(days_html_for_one_page, str(count))
+    build_all_page_html(all_entries)
+    build_all_page_rss(all_entries)
 
-# build rss
-rss_xml = RSS_XML.format(
-        lastbuild=datetime.now().strftime("%a, %d %b %Y %H:%M:%S GMT"),
-        item=rss_xml_all_items)
-
-rss_path = DEST_DIR + "/rss.xml"
-
-with open(rss_path, "bw") as f:
-    sys.stdout.write("%s.." % (abs_path))
-    f.write(rss_xml.encode("utf-8", "replace"))
-    sys.stdout.write("written\n")
+if __name__ == "__main__":
+   process(get_files(SOURCE_DIR))

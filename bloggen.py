@@ -27,6 +27,11 @@ def remove_tags(text):
     res = res.replace("&", "&amp;")
     return res
 
+with open("templates/list.tmpl") as f:
+    LIST_HTML = f.read()
+
+with open("templates/list_item.tmpl") as f:
+    LIST_ITEM_HTML = f.read()
 
 with open("templates/entry.tmpl") as f:
     ENTRY_HTML = f.read()
@@ -113,6 +118,31 @@ def build_single_page_html(entry):
     with open(abs_path, "bw") as f:
         f.write(all_html.encode("utf-8", "replace"))
         sys.stdout.write("written\n")
+
+
+def build_body_list_html(all_entries):
+    """
+    Build a html list page that contains links to actual articles.
+    """
+    count = 0
+    entries_html_for_one_page = []
+
+    for timestamp in sorted(iter(all_entries), reverse=True)[:100]:
+        entry = all_entries[timestamp]
+        LIST_ITEM_html = LIST_ITEM_HTML.format(
+                    title=entry["title"],
+                    date=entry["date"],
+                    day=entry["day"],
+                    link=entry["article_link"]
+                )
+
+        entries_html_for_one_page.append(LIST_ITEM_html)
+
+    full_list_html = LIST_HTML.format(
+        links="\n".join(entries_html_for_one_page)
+    )
+
+    write_page([full_list_html], str(count))
 
 
 def build_all_page_html(all_entries):
@@ -221,7 +251,7 @@ def process(files):
         d = entry["date"].strftime("%Y%m%d%H%M%S")
         all_entries[d] = entry
 
-    build_all_page_html(all_entries)
+    build_body_list_html(all_entries)
     build_all_page_rss(all_entries)
 
 if __name__ == "__main__":
